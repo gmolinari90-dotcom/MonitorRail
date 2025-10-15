@@ -21,18 +21,18 @@ float_threshold = st.sidebar.slider("Margine di flessibilità (giorni)", 0, 30, 
 run_analysis = st.sidebar.button("▶️ Avvia Analisi")
 
 if run_analysis:
-    log_messages = []
-
     if not mpp_file:
         st.error("Devi caricare almeno un file Project .xml per procedere")
     else:
+        log_messages = []
         try:
-            # --- Parsing XML ---
+            # ================================
+            # Step 1: Verifica caricamento file
+            # ================================
             tree = ET.parse(mpp_file)
             root = tree.getroot()
             log_messages.append(f"File XML caricato correttamente: {mpp_file.name}")
 
-            # --- Estrazione attività (esempio semplificato) ---
             tasks = []
             for t in root.findall('.//Task'):
                 uid = t.find('UID').text if t.find('UID') is not None else None
@@ -51,33 +51,38 @@ if run_analysis:
                     'TotalSlack': total_slack
                 })
 
-            if not tasks:
-                log_messages.append("⚠️ Nessuna attività trovata nel file XML.")
-
             df_tasks = pd.DataFrame(tasks)
-            log_messages.append(f"Totale attività lette: {len(df_tasks)}")
 
-            # --- Mostra log nella UI ---
-            with st.expander("📋 Log Analisi / Avvisi", expanded=True):
+            # Verifica campi mancanti
+            missing_fields = df_tasks.isnull().sum()
+            log_messages.append(f"Totale attività lette: {len(df_tasks)}")
+            for col, val in missing_fields.items():
+                if val > 0:
+                    log_messages.append(f"⚠️ {val} valori mancanti nella colonna '{col}'")
+
+            # ================================
+            # Step 2: Mostra log e tabella preliminare
+            # ================================
+            with st.expander("📋 Log Verifica File", expanded=True):
                 for msg in log_messages:
                     st.text(msg)
 
-            # --- Mostra tabella attività ---
-            st.subheader("📊 Attività Progetto")
+            st.subheader("📊 Tabella preliminare attività")
             st.dataframe(df_tasks, use_container_width=True)
 
-            # --- Pulsante download CSV ---
             csv_buffer = BytesIO()
             df_tasks.to_csv(csv_buffer, index=False)
-            st.download_button("⬇️ Scarica attività come CSV", data=csv_buffer.getvalue(), file_name="attivita_progetto.csv")
+            st.download_button("⬇️ Scarica attività preliminare CSV", data=csv_buffer.getvalue(), file_name="attivita_preliminare.csv")
 
-            # --- Esempio generazione grafico PercentComplete ---
+            # ================================
+            # Step 3: Grafico avanzamento percentuale
+            # ================================
             if 'PercentComplete' in df_tasks.columns and df_tasks['PercentComplete'].notnull().any():
                 df_plot = df_tasks.dropna(subset=['PercentComplete'])
                 df_plot['PercentComplete'] = df_plot['PercentComplete'].astype(float)
 
                 fig, ax = plt.subplots()
-                ax.bar(df_plot['Name'], df_plot['PercentComplete'])
+                ax.bar(df_plot['Name'], df_plot['PercentComplete'], color='skyblue')
                 ax.set_ylabel('Percentuale completamento')
                 ax.set_xlabel('Attività')
                 ax.set_xticklabels(df_plot['Name'], rotation=90)
@@ -90,5 +95,25 @@ if run_analysis:
             else:
                 st.warning("⚠️ Percentuale completamento non disponibile per le attività.")
 
+            st.success("Analisi completata con successo ✅")
+
+        except ET.ParseError:
+            st.error("Errore: il file XML non è leggibile o è corrotto.")
         except Exception as e:
-            st.error(f"Errore durante l'analisi del file XML: {e}")
+            st.error(f"Errore inatteso durante l'analisi: {e}")
+
+st.sidebar.markdown("---")
+st.sidebar.caption("💡 MonitorRail v1.0 - sviluppato per il controllo avanzato dei cantieri ferroviari.")
+
+# ===========================================================
+# GUIDA RAPIDA secondaria
+# ===========================================================
+st.markdown("""
+### 🧭 Guida Rapida
+- Carica il file di Project principale (.xml)
+- (Facoltativo) Carica un secondo file Project aggiornato con l'avanzamento attività
+- Seleziona il periodo e la soglia del margine di flessibilità
+  - Se non selezioni le date, verrà analizzato l'intero progetto
+- Clicca **Avvia Analisi** per generare i grafici e gli alert
+- I risultati saranno mostrati direttamente nella UI e scaricabili come CSV o PNG
+""")
