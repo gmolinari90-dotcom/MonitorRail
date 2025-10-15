@@ -1,6 +1,7 @@
 import streamlit as st
 from MonitorRail_MVP import analizza_file_project
 import time
+import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="MonitorRail", layout="wide")
 
@@ -8,6 +9,7 @@ if "first_run" not in st.session_state:
     st.session_state.first_run = True
 
 st.title("🚄 MonitorRail – Analisi Avanzamento Progetto")
+st.markdown("Applicazione per la lettura e l’analisi dei file XML di Microsoft Project")
 
 st.divider()
 st.markdown("### 1️⃣ Primo File Project (Baseline)")
@@ -27,7 +29,6 @@ with col2:
 
 st.divider()
 st.markdown("### 4️⃣ Elementi da Analizzare")
-
 col1, col2 = st.columns(2)
 with col1:
     curva_sil = st.checkbox("Curva SIL")
@@ -43,7 +44,6 @@ colA, colB = st.columns([3, 1])
 colB.button("🔄 Refresh", key="refresh_button", on_click=lambda: st.rerun())
 run_analysis = colA.button("🚀 Avvia Analisi", disabled=not analisi_scelte)
 
-# Variabili di log
 log_text = ""
 show_log = False
 
@@ -57,11 +57,11 @@ if run_analysis:
             progress_bar = st.progress(0, text=progress_text)
 
             for percent in range(0, 101, 25):
-                time.sleep(0.2)
+                time.sleep(0.25)
                 progress_bar.progress(percent, text=f"{progress_text} ({percent}%)")
 
             try:
-                risultati, log_text = analizza_file_project(
+                risultati, grafici, log_text = analizza_file_project(
                     baseline_file=baseline_file,
                     update_file=update_file,
                     opzioni={
@@ -75,15 +75,27 @@ if run_analysis:
                 )
 
                 st.success("✅ Analisi completata con successo!")
-                st.dataframe(risultati, width="stretch")
+                st.dataframe(risultati, use_container_width=True)
 
+                # --- Mostra Curva SIL se disponibile ---
+                if "Curva SIL" in grafici:
+                    st.markdown("### 📈 Curva SIL – Andamento Cumulativo")
+                    df_sil = grafici["Curva SIL"]
+                    fig, ax = plt.subplots()
+                    ax.plot(df_sil["Fine"], df_sil["Cumulativo"], marker="o", linestyle="-")
+                    ax.set_xlabel("Data Fine")
+                    ax.set_ylabel("Avanzamento Cumulativo (%)")
+                    ax.grid(True)
+                    st.pyplot(fig)
+
+                # --- Log analisi con icona di alert ---
                 if log_text:
-                    st.markdown("🔺 **Log analisi dettagliato disponibile**")
-                    with st.expander("🩶 Log Analisi Dettagliata"):
+                    st.markdown("⚠️ **Log analisi dettagliato disponibile**")
+                    with st.expander("⚠️ Log Analisi Dettagliata"):
                         st.info(log_text)
 
             except Exception as e:
                 st.error(f"❌ Errore durante l’analisi: {e}")
-                st.markdown("🔺 **Log analisi dettagliato disponibile**")
-                with st.expander("🩶 Log Analisi Dettagliata"):
+                st.markdown("⚠️ **Log analisi dettagliato disponibile**")
+                with st.expander("⚠️ Log Analisi Dettagliata"):
                     st.code(str(e))
