@@ -18,8 +18,17 @@ project_file = st.sidebar.file_uploader("Carica file di Project (formato .xml o 
 progress_file = st.sidebar.file_uploader("Carica file Project aggiornato con avanzamento (facoltativo)", type=["xml", "mpp"])
 
 # --- Filtri temporali ---
-start_date = st.sidebar.date_input("Data inizio analisi")
-end_date = st.sidebar.date_input("Data fine analisi")
+st.sidebar.markdown("ℹ️ Se non selezioni le date, verrà analizzato l'intero progetto")
+
+# Se il file project è presente, impostiamo date di default fittizie (verranno lette dal backend)
+def default_start_date():
+    return None
+
+def default_end_date():
+    return None
+
+start_date = st.sidebar.date_input("Data inizio analisi (gg/mm/aaaa)", value=default_start_date())
+end_date = st.sidebar.date_input("Data fine analisi (gg/mm/aaaa)", value=default_end_date())
 
 # --- Parametri avanzati ---
 float_threshold = st.sidebar.slider("Margine di flessibilità (giorni)", 0, 30, 5)
@@ -34,7 +43,6 @@ if run_analysis:
     if project_file is None:
         st.warning("⚠️ Carica almeno un file Project (.xml o .mpp) per avviare l'analisi.")
     else:
-        # --- Messaggio iniziale ---
         st.info("🔍 Analisi in corso... Attendere il completamento.")
 
         # --- Barra di avanzamento simulata ---
@@ -49,13 +57,17 @@ if run_analysis:
         if project_file.name.endswith('.mpp'):
             st.warning("📁 Il file .mpp non può essere letto direttamente. Apri il file in Microsoft Project e usa **File > Esporta > XML** per salvarlo in formato compatibile.")
         else:
+            # --- Prepara parametri date ---
+            start_param = start_date.strftime('%d/%m/%Y') if start_date else 'auto'
+            end_param = end_date.strftime('%d/%m/%Y') if end_date else 'auto'
+
             # --- Esegui motore principale ---
             cmd = [
                 "python", "MonitorRail_MVP.py",
                 f"--project={project_file.name if project_file else ''}",
                 f"--progress={progress_file.name if progress_file else ''}",
-                f"--start={start_date}",
-                f"--end={end_date}",
+                f"--start={start_param}",
+                f"--end={end_param}",
                 f"--float-threshold={float_threshold}"
             ]
 
@@ -85,7 +97,7 @@ if run_analysis:
                 st.image(os.path.join(output_dir, "diagramma_reticolare.png"))
 
 st.sidebar.markdown("---")
-st.sidebar.caption("💡 MonitorRail v1.0 - sviluppato per il controllo avanzato dei cantieri ferroviari.")
+st.sidebar.caption("💡 MonitorRail v2.2 - Analisi avanzata dei programmi lavori ferroviari.")
 
 # ===========================================================
 # GUIDA RAPIDA
@@ -97,6 +109,7 @@ st.markdown("""
 2️⃣ (Facoltativo) Carica un secondo file Project aggiornato con l'avanzamento attività.
 
 3️⃣ Seleziona il periodo e la soglia del margine di flessibilità.
+   - Se non selezioni le date, verrà analizzato l'intero progetto.
 
 4️⃣ Clicca **Avvia Analisi** per generare i grafici e gli alert.
 
