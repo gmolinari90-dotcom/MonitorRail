@@ -1,74 +1,90 @@
 import streamlit as st
-import pandas as pd
 from MonitorRail_MVP import analizza_file_project
+import time
 
-st.set_page_config(page_title="MonitorRail - Centrale di Controllo", layout="centered")
+# Impostazioni iniziali
+st.set_page_config(page_title="MonitorRail", layout="wide")
 
-st.title("🚄 MonitorRail - Centrale di Controllo")
-st.markdown("---")
-
+# Inizializzazione sessione
 if "first_run" not in st.session_state:
     st.session_state.first_run = True
 
-# === 1. File Project Principale (Baseline) ===
-st.subheader("1️⃣ Primo File Project (Baseline)")
-baseline_file = st.file_uploader("Carica file XML esportato da Microsoft Project", type=["xml"])
+# Titolo principale
+st.title("🚄 MonitorRail – Analisi Avanzamento Progetto")
 
-# === 2. Secondo File Project (Aggiornamento) (Facoltativo) ===
-with st.expander("2️⃣ Secondo File Project (Aggiornamento Mensile/Trimestrale) (Facoltativo)"):
-    avanzamento_file = st.file_uploader("Carica file XML aggiornato", type=["xml"])
+st.divider()
+st.markdown("### 1️⃣ Primo File Project (Baseline)")
+baseline_file = st.file_uploader("Carica il file XML del progetto principale", type=["xml"])
 
-# === 3. Periodo da Analizzare ===
-st.subheader("3️⃣ Periodo da Analizzare")
+st.divider()
+with st.expander("### 2️⃣ Secondo File Project (Aggiornamento Mensile/Trimestrale) (Facoltativo)"):
+    update_file = st.file_uploader("Carica il file XML di aggiornamento", type=["xml"])
+
+st.divider()
+st.markdown("### 3️⃣ Periodo da Analizzare")
 col1, col2 = st.columns(2)
 with col1:
-    start_date = st.text_input("Data Inizio", "Da file Project", placeholder="gg/mm/aaaa")
+    data_inizio = st.text_input("Data Inizio", value="Da file Project", max_chars=20)
 with col2:
-    end_date = st.text_input("Data Fine", "Da file Project", placeholder="gg/mm/aaaa")
+    data_fine = st.text_input("Data Fine", value="Da file Project", max_chars=20)
 
-# === 4. Elementi da Analizzare ===
-st.subheader("4️⃣ Elementi da Analizzare")
+st.divider()
+st.markdown("### 4️⃣ Elementi da Analizzare")
+
 col1, col2 = st.columns(2)
 with col1:
-    analisi_sil = st.checkbox("Curva SIL")
-    analisi_mezzi = st.checkbox("Mezzi")
+    curva_sil = st.checkbox("Curva SIL")
+    manodopera = st.checkbox("Manodopera")
 with col2:
-    analisi_manodopera = st.checkbox("Manodopera")
-    analisi_percentuale = st.checkbox("Avanzamento Attività")
+    mezzi = st.checkbox("Mezzi")
+    avanzamento = st.checkbox("% Avanzamento Attività")
 
-# === Bottone Avvio / Refresh ===
-st.markdown("---")
-colA, colB = st.columns(2)
+analisi_scelte = any([curva_sil, manodopera, mezzi, avanzamento])
 
-if not any([analisi_sil, analisi_manodopera, analisi_mezzi, analisi_percentuale]):
-    colA.button("🚫 Seleziona almeno un'analisi", disabled=True)
-else:
-    run_analysis = colA.button("▶️ Avvia Analisi")
-    if run_analysis:
-        if not baseline_file:
-            st.error("⚠️ Carica almeno il file principale (.xml)")
-        else:
-            risultati = analizza_file_project(
-                baseline_file=baseline_file,
-                avanzamento_file=avanzamento_file,
-                start_date=start_date,
-                end_date=end_date,
-                analisi_sil=analisi_sil,
-                analisi_manodopera=analisi_manodopera,
-                analisi_mezzi=analisi_mezzi,
-                analisi_percentuale=analisi_percentuale
-            )
+st.divider()
+colA, colB = st.columns([3, 1])
 
-            st.subheader("📜 Log Analisi")
-            for r in risultati["log"]:
-                st.markdown(f"- {r}")
+# Bottone Refresh
+colB.button("🔄 Refresh", key="refresh_button", on_click=lambda: st.rerun())
 
-            if not risultati["df_finale"].empty:
-                st.subheader("📊 Tabella Attività Estratte")
-                st.dataframe(risultati["df_finale"], use_container_width=True)
-                csv_data = risultati["csv_buffers"]["attività"].getvalue()
-                st.download_button("⬇️ Scarica CSV", data=csv_data, file_name="attivita_estratte.csv", mime="text/csv")
-            else:
-                st.warning("⚠️ Nessuna attività trovata.")
+# Bottone Avvio Analisi
+run_analysis = colA.button("🚀 Avvia Analisi", disabled=not analisi_scelte)
 
-colB.button("🔄 Refresh", on_click=lambda: st.experimental_rerun())
+# Log e verifica file
+log_area = st.container()
+with log_area:
+    st.markdown("#### 📋 Log Verifica File")
+
+if run_analysis:
+    st.session_state.first_run = False
+    if not baseline_file:
+        st.error("⚠️ Carica almeno il file principale (.xml)")
+    else:
+        with st.spinner("Analisi in corso..."):
+            progress_text = "Analisi dei dati in corso..."
+            progress_bar = st.progress(0, text=progress_text)
+
+            for percent in range(0, 101, 20):
+                time.sleep(0.2)
+                progress_bar.progress(percent, text=f"{progress_text} ({percent}%)")
+
+            try:
+                risultati = analizza_file_project(
+                    baseline_file=baseline_file,
+                    update_file=update_file,
+                    opzioni={
+                        "curva_sil": curva_sil,
+                        "manodopera": manodopera,
+                        "mezzi": mezzi,
+                        "avanzamento": avanzamento
+                    },
+                    data_inizio=data_inizio,
+                    data_fine=data_fine
+                )
+
+                st.success("✅ Analisi completata con successo!")
+                st.write("**Risultati sintetici:**")
+                st.dataframe(risultati, width="stretch")
+
+            except Exception as e:
+                st.error(f"❌ Errore durante l’analisi: {e}")
