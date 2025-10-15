@@ -58,7 +58,7 @@ with col2:
 # ====================================================
 if reset_analysis:
     st.session_state.first_run = True
-    st.experimental_rerun()
+    st.rerun()  # ✅ CORRETTO (invece di st.experimental_rerun())
 
 if run_analysis:
     st.session_state.first_run = False
