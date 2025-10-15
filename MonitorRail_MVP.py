@@ -2,13 +2,21 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 from io import BytesIO
 
-def analizza_file_project(baseline_file, update_file=None, opzioni=None, data_inizio=None, data_fine=None):
-    """
-    Funzione principale per analizzare i file XML di progetto
-    Restituisce un DataFrame con i risultati sintetici
-    """
+def trova_nodi_attivita(root):
+    """Tenta di trovare i nodi attività anche con namespace diversi"""
+    possibili_tag = ["Task", "Activity", "Tasks/Task"]
+    for tag in possibili_tag:
+        tasks = root.findall(f".//{tag}")
+        if tasks:
+            return tasks
+    # Se ci sono namespace, li cattura
+    for elem in root.iter():
+        if "Task" in elem.tag or "Activity" in elem.tag:
+            return list(root.iter(elem.tag))
+    return []
 
-    # Lettura file principale (Baseline)
+def analizza_file_project(baseline_file, update_file=None, opzioni=None, data_inizio=None, data_fine=None):
+    """Analizza i file XML di progetto e restituisce un DataFrame di sintesi"""
     try:
         baseline_content = baseline_file.read()
         baseline_tree = ET.parse(BytesIO(baseline_content))
@@ -16,7 +24,6 @@ def analizza_file_project(baseline_file, update_file=None, opzioni=None, data_in
     except Exception as e:
         raise Exception(f"Errore nella lettura del file baseline: {e}")
 
-    # Lettura file aggiornamento (opzionale)
     update_root = None
     if update_file:
         try:
@@ -26,29 +33,30 @@ def analizza_file_project(baseline_file, update_file=None, opzioni=None, data_in
         except Exception as e:
             raise Exception(f"Errore nella lettura del file aggiornamento: {e}")
 
-    # Estrazione attività
+    # Trova attività
+    activities_nodes = trova_nodi_attivita(baseline_root)
+    if not activities_nodes:
+        raise Exception("Nessuna attività trovata nel file XML. Verifica il formato.")
+
     activities = []
-    try:
-        for task in baseline_root.findall(".//Task"):
-            name = task.findtext("Name", "Senza nome")
-            start = task.findtext("Start")
-            finish = task.findtext("Finish")
-            percent = task.findtext("PercentComplete", "0")
-            activities.append({
-                "Nome attività": name,
-                "Inizio": start,
-                "Fine": finish,
-                "Completamento": f"{percent}%"
-            })
-    except Exception as e:
-        raise Exception(f"Errore durante la lettura delle attività: {e}")
+    for task in activities_nodes:
+        name = task.findtext("Name") or task.findtext("TaskName") or "Senza nome"
+        start = task.findtext("Start") or task.findtext("StartDate")
+        finish = task.findtext("Finish") or task.findtext("FinishDate")
+        percent = task.findtext("PercentComplete") or task.findtext("PercentDone") or "0"
+        activities.append({
+            "Nome attività": name,
+            "Inizio": start,
+            "Fine": finish,
+            "Completamento": f"{percent}%"
+        })
 
     if len(activities) == 0:
-        raise Exception("Nessuna attività trovata nel file XML. Verifica il formato.")
+        raise Exception("File caricato ma nessuna attività leggibile: controlla i campi del file XML.")
 
     df = pd.DataFrame(activities)
 
-    # Filtraggio per date se definite
+    # Filtraggio per periodo
     if data_inizio != "Da file Project" and data_fine != "Da file Project":
         try:
             df["Inizio"] = pd.to_datetime(df["Inizio"])
@@ -58,7 +66,6 @@ def analizza_file_project(baseline_file, update_file=None, opzioni=None, data_in
         except Exception:
             pass
 
-    # Analisi per opzioni selezionate
     risultati = []
     if opzioni.get("curva_sil"):
         risultati.append({"Analisi": "Curva SIL", "Stato": "Completata"})
@@ -69,4 +76,4 @@ def analizza_file_project(baseline_file, update_file=None, opzioni=None, data_in
     if opzioni.get("avanzamento"):
         risultati.append({"Analisi": "% Avanzamento Attività", "Stato": "Completata"})
 
-    return pd.DataFrame(risultati)
+    return pd.DataFrame(risultati), f"Totale attività lette: {len(df)}"
