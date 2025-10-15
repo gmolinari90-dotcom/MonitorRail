@@ -3,12 +3,39 @@ from io import BytesIO
 import xml.etree.ElementTree as ET
 import matplotlib.pyplot as plt
 
-def analizza_file_project(baseline_file=None, avanzamento_file=None, start_date=None, end_date=None, float_threshold=5):
+def estrai_date_progetto(file_project):
+    """Estrae data inizio e fine dal file Project XML"""
+    try:
+        tree = ET.parse(file_project)
+        root = tree.getroot()
+        start_tasks = []
+        finish_tasks = []
+        for t in root.findall('.//Task'):
+            s = t.find('Start').text if t.find('Start') is not None else None
+            f = t.find('Finish').text if t.find('Finish') is not None else None
+            if s: start_tasks.append(pd.to_datetime(s))
+            if f: finish_tasks.append(pd.to_datetime(f))
+        start_date = min(start_tasks) if start_tasks else None
+        end_date = max(finish_tasks) if finish_tasks else None
+        return start_date, end_date
+    except Exception:
+        return None, None
+
+def analizza_file_project(
+    baseline_file=None,
+    avanzamento_file=None,
+    start_date=None,
+    end_date=None,
+    float_threshold=5,
+    analisi_sil=False,
+    analisi_manodopera=False,
+    analisi_mezzi=False,
+    analisi_percentuale=False
+):
     log_messages = []
     df_baseline = pd.DataFrame()
     df_avanzamento = pd.DataFrame()
-    fig = None
-    img_buffer = None
+    results = {}
 
     try:
         # ---------- Lettura file baseline ----------
@@ -26,7 +53,7 @@ def analizza_file_project(baseline_file=None, avanzamento_file=None, start_date=
                 tasks_base.append({'UID': uid, 'Name': name, 'Start': start, 'Finish': finish})
             df_baseline = pd.DataFrame(tasks_base)
 
-        # ---------- Lettura file avanzamento ----------
+        # ---------- Lettura file avanzamento (opzionale) ----------
         if avanzamento_file:
             tree_av = ET.parse(avanzamento_file)
             root_av = tree_av.getroot()
@@ -40,7 +67,7 @@ def analizza_file_project(baseline_file=None, avanzamento_file=None, start_date=
                 tasks_av.append({'UID': uid, 'Name': name, 'PercentComplete': percent})
             df_avanzamento = pd.DataFrame(tasks_av)
 
-        # ---------- Generazione tabella finale ----------
+        # ---------- Combinazione dati ----------
         if not df_baseline.empty and not df_avanzamento.empty:
             df_finale = pd.merge(df_baseline, df_avanzamento, on=['UID','Name'], how='left')
             log_messages.append("Confronto baseline - avanzamento eseguito.")
@@ -49,42 +76,48 @@ def analizza_file_project(baseline_file=None, avanzamento_file=None, start_date=
             log_messages.append("Analisi eseguita su baseline. Percentuale avanzamento non disponibile.")
         elif not df_avanzamento.empty:
             df_finale = df_avanzamento.copy()
-            log_messages.append("Analisi eseguita su file avanzamento. Percentuale avanzamento disponibile se presente.")
+            log_messages.append("Analisi eseguita su file avanzamento.")
         else:
             df_finale = pd.DataFrame()
             log_messages.append("Nessun dato disponibile da analizzare.")
 
-        # CSV buffer
-        csv_buffer = BytesIO()
-        df_finale.to_csv(csv_buffer, index=False)
+        # ---------- Generazione report e grafici in base alle selezioni ----------
+        results['csv_buffers'] = {}
+        results['figures'] = {}
 
-        # Grafico PercentComplete solo se colonna disponibile
-        if 'PercentComplete' in df_finale.columns and df_finale['PercentComplete'].notnull().any():
+        if analisi_percentuale and 'PercentComplete' in df_finale.columns:
             df_plot = df_finale.dropna(subset=['PercentComplete'])
-            df_plot['PercentComplete'] = df_plot['PercentComplete'].astype(float)
+            if not df_plot.empty:
+                df_plot['PercentComplete'] = df_plot['PercentComplete'].astype(float)
+                fig, ax = plt.subplots(figsize=(10,5))
+                ax.bar(df_plot['Name'], df_plot['PercentComplete'], color='skyblue')
+                ax.set_ylabel('Percentuale completamento')
+                ax.set_xlabel('Attività')
+                ax.set_xticklabels(df_plot['Name'], rotation=90)
+                buf = BytesIO()
+                fig.savefig(buf, format='png', bbox_inches='tight')
+                results['figures']['percentuale'] = buf
+                results['csv_buffers']['percentuale'] = BytesIO()
+                df_plot.to_csv(results['csv_buffers']['percentuale'], index=False)
 
-            fig, ax = plt.subplots(figsize=(10, 5))
-            ax.bar(df_plot['Name'], df_plot['PercentComplete'], color='skyblue')
-            ax.set_ylabel('Percentuale completamento')
-            ax.set_xlabel('Attività')
-            ax.set_xticklabels(df_plot['Name'], rotation=90)
+        # Per SIL, manodopera, mezzi: generiamo CSV fittizi (placeholder)
+        if analisi_sil:
+            buf = BytesIO()
+            df_finale.to_csv(buf, index=False)
+            results['csv_buffers']['sil'] = buf
+        if analisi_manodopera:
+            buf = BytesIO()
+            df_finale.to_csv(buf, index=False)
+            results['csv_buffers']['manodopera'] = buf
+        if analisi_mezzi:
+            buf = BytesIO()
+            df_finale.to_csv(buf, index=False)
+            results['csv_buffers']['mezzi'] = buf
 
-            img_buffer = BytesIO()
-            fig.savefig(img_buffer, format='png', bbox_inches='tight')
-        else:
-            fig = None
+        results['df_finale'] = df_finale
+        results['log'] = log_messages
+        return results
 
-        return {
-            'log': log_messages,
-            'df_tasks': df_finale,
-            'csv_buffer': csv_buffer,
-            'fig': fig,
-            'img_buffer': img_buffer
-        }
-
-    except ET.ParseError:
-        log_messages.append("Errore: file XML non leggibile o corrotto.")
-        return {'log': log_messages, 'df_tasks': pd.DataFrame(), 'csv_buffer': BytesIO(), 'fig': None, 'img_buffer': None}
     except Exception as e:
         log_messages.append(f"Errore inatteso: {e}")
-        return {'log': log_messages, 'df_tasks': pd.DataFrame(), 'csv_buffer': BytesIO(), 'fig': None, 'img_buffer': None}
+        return {'log': log_messages, 'df_finale': pd.DataFrame(), 'csv_buffers': {}, 'figures': {}}
