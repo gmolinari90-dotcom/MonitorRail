@@ -4,9 +4,10 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import os
 import argparse
+import streamlit as st
 
 # ===========================================================
-# MonitorRail_MVP.py - Backend reale con log dettagliato
+# MonitorRail_MVP.py - Backend reale con feedback su campi mancanti
 # ===========================================================
 
 parser = argparse.ArgumentParser(description='Motore MonitorRail')
@@ -22,8 +23,7 @@ os.makedirs(output_dir, exist_ok=True)
 
 # Creazione log dettagliato
 log_file = os.path.join(output_dir, 'run_log.txt')
-with open(log_file, 'w') as log:
-    log.write('=== Inizio Analisi MonitorRail ===\n')
+log_messages = []
 
 # ===========================================================
 # 1️⃣ Lettura file Project XML
@@ -33,13 +33,12 @@ project_file = args.project
 try:
     tree = ET.parse(project_file)
     root = tree.getroot()
-    log.write(f'File {project_file} letto correttamente.\n')
+    log_messages.append(f'File {project_file} letto correttamente.')
 except Exception as e:
-    with open(log_file, 'a') as log:
-        log.write(f'ERRORE lettura file: {e}\n')
+    log_messages.append(f'ERRORE lettura file: {e}')
     raise
 
-ns = {'ns': 'http://schemas.microsoft.com/project'}  # Namespace XML di Project
+ns = {'ns': 'http://schemas.microsoft.com/project'}
 
 activities = []
 for task in root.findall('.//ns:Task', ns):
@@ -47,101 +46,95 @@ for task in root.findall('.//ns:Task', ns):
     name = task.find('ns:Name', ns).text if task.find('ns:Name', ns) is not None else None
     start = task.find('ns:Start', ns).text if task.find('ns:Start', ns) is not None else None
     finish = task.find('ns:Finish', ns).text if task.find('ns:Finish', ns) is not None else None
-    percent_complete = int(task.find('ns:PercentComplete', ns).text) if task.find('ns:PercentComplete', ns) is not None else 0
-    total_slack = int(task.find('ns:TotalSlack', ns).text) if task.find('ns:TotalSlack', ns) is not None else 0
+    percent_complete = task.find('ns:PercentComplete', ns).text if task.find('ns:PercentComplete', ns) is not None else None
+    total_slack = task.find('ns:TotalSlack', ns).text if task.find('ns:TotalSlack', ns) is not None else None
     resources = []
     for res_assign in task.findall('ns:Assignments/ns:Assignment', ns):
         res_name = res_assign.find('ns:ResourceUID', ns).text
         resources.append(res_name)
 
-    if id_task and name:
-        activities.append({
-            'UID': id_task,
-            'Nome': name,
-            'Start': start,
-            'Finish': finish,
-            '%Completamento': percent_complete,
-            'TotalSlack': total_slack,
-            'Risorse': resources
-        })
-
-with open(log_file, 'a') as log:
-    log.write(f'{len(activities)} attività lette dal file XML.\n')
+    activities.append({
+        'UID': id_task,
+        'Nome': name,
+        'Start': start,
+        'Finish': finish,
+        '%Completamento': percent_complete,
+        'TotalSlack': total_slack,
+        'Risorse': resources
+    })
 
 if len(activities) == 0:
-    with open(log_file, 'a') as log:
-        log.write('ATTENZIONE: nessuna attività letta. Verranno creati file fittizi di test.\n')
+    log_messages.append('⚠ Nessuna attività letta. Verranno creati file fittizi di test.')
 
-# ===========================================================
-# Creazione DataFrame e file fittizi se necessario
-# ===========================================================
+# Creazione DataFrame
 df_activities = pd.DataFrame(activities)
 
-if len(df_activities) == 0:
-    # File fittizi per test UI
-    df_activities = pd.DataFrame([{'UID':1,'Nome':'Test','Start':'2025-01-01','Finish':'2025-01-05','%Completamento':50,'TotalSlack':0,'Risorse':['Trattore']}])
+# Controllo campi critici
+critical_fields = ['%Completamento', 'TotalSlack', 'Start', 'Finish', 'UID', 'Nome']
+for field in critical_fields:
+    if df_activities[field].isnull().all():
+        log_messages.append(f'⚠ Attenzione: nessun dato {field} letto. Alcuni calcoli potrebbero non essere disponibili.')
 
 # ===========================================================
-# 2️⃣ Filtraggio periodo se specificato
+# Filtraggio periodo
 # ===========================================================
 if args.start != 'auto':
     start_filter = pd.to_datetime(args.start, dayfirst=True)
-    df_activities['Start_dt'] = pd.to_datetime(df_activities['Start'])
+    df_activities['Start_dt'] = pd.to_datetime(df_activities['Start'], errors='coerce')
     df_activities = df_activities[df_activities['Start_dt'] >= start_filter]
 
 if args.end != 'auto':
     end_filter = pd.to_datetime(args.end, dayfirst=True)
-    df_activities['Finish_dt'] = pd.to_datetime(df_activities['Finish'])
+    df_activities['Finish_dt'] = pd.to_datetime(df_activities['Finish'], errors='coerce')
     df_activities = df_activities[df_activities['Finish_dt'] <= end_filter]
 
 # ===========================================================
-# 3️⃣ Attività critiche / sub-critiche
+# Attività critiche / sub-critiche
 # ===========================================================
 threshold = args.float_threshold
-critical_tasks = df_activities[df_activities['TotalSlack'] <= threshold]
-critical_tasks.to_csv(os.path.join(output_dir, 'summary_alerts.csv'), index=False)
+if 'TotalSlack' in df_activities.columns and df_activities['TotalSlack'].notnull().any():
+    critical_tasks = df_activities[df_activities['TotalSlack'].astype(float) <= threshold]
+    critical_tasks.to_csv(os.path.join(output_dir, 'summary_alerts.csv'), index=False)
+else:
+    log_messages.append('⚠ Non è possibile generare summary_alerts.csv: TotalSlack non disponibile.')
 
 # ===========================================================
-# 4️⃣ Mezzi distinti
+# Mezzi distinti
 # ===========================================================
-mezzi_list = []
-for res_list in df_activities['Risorse']:
-    mezzi_list.extend(res_list)
-
-mezzi_distinti = pd.DataFrame(pd.Series(mezzi_list).value_counts()).reset_index()
-mezzi_distinti.columns = ['Mezzo', 'Quantità']
-mezzi_distinti.to_csv(os.path.join(output_dir, 'mezzi_distinti.csv'), index=False)
-
-# ===========================================================
-# 5️⃣ Curva SIL cumulativa
-# ===========================================================
-df_activities['AvanzamentoEconomico'] = df_activities['%Completamento']  # placeholder
-sil_curve = df_activities.groupby('Start')['AvanzamentoEconomico'].sum().cumsum()
-plt.figure(figsize=(10,5))
-sil_curve.plot()
-plt.title('Curva di Produzione SIL')
-plt.xlabel('Data Inizio Attività')
-plt.ylabel('Avanzamento cumulativo')
-plt.grid(True)
-plt.tight_layout()
-plt.savefig(os.path.join(output_dir, 'curva_SIL.png'))
-plt.close()
+if 'Risorse' in df_activities.columns and df_activities['Risorse'].notnull().any():
+    mezzi_list = []
+    for res_list in df_activities['Risorse']:
+        mezzi_list.extend(res_list)
+    mezzi_distinti = pd.DataFrame(pd.Series(mezzi_list).value_counts()).reset_index()
+    mezzi_distinti.columns = ['Mezzo', 'Quantità']
+    mezzi_distinti.to_csv(os.path.join(output_dir, 'mezzi_distinti.csv'), index=False)
+else:
+    log_messages.append('⚠ Non è possibile generare mezzi_distinti.csv: Risorse non disponibili.')
 
 # ===========================================================
-# 6️⃣ Diagramma reticolare percorso critico
+# Curva SIL cumulativa
+# ===========================================================
+if '%Completamento' in df_activities.columns and df_activities['%Completamento'].notnull().any():
+    df_activities['AvanzamentoEconomico'] = df_activities['%Completamento'].astype(float)
+    sil_curve = df_activities.groupby('Start')['AvanzamentoEconomico'].sum().cumsum()
+    plt.figure(figsize=(10,5))
+    sil_curve.plot()
+    plt.title('Curva di Produzione SIL')
+    plt.xlabel('Data Inizio Attività')
+    plt.ylabel('Avanzamento cumulativo')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'curva_SIL.png'))
+    plt.close()
+else:
+    log_messages.append('⚠ Non è possibile generare curva_SIL.png: %Completamento non disponibile.')
+
+# ===========================================================
+# Diagramma reticolare percorso critico
 # ===========================================================
 G = nx.DiGraph()
 for idx, row in df_activities.iterrows():
-    G.add_node(row['Nome'], slack=row['TotalSlack'])
-
-# Archi semplificati per esempio
-for idx, row in df_activities.iterrows():
-    pred = row.get('Predecessors', None)
-    if pred:
-        for p in pred.split(','):
-            pred_name = df_activities[df_activities['UID'] == p]['Nome'].values
-            if len(pred_name) > 0:
-                G.add_edge(pred_name[0], row['Nome'])
+    G.add_node(row['Nome'], slack=row['TotalSlack'] if row['TotalSlack'] else 0)
 
 plt.figure(figsize=(12,8))
 pos = nx.spring_layout(G)
@@ -152,11 +145,15 @@ plt.tight_layout()
 plt.savefig(os.path.join(output_dir, 'diagramma_reticolare.png'))
 plt.close()
 
-with open(log_file, 'a') as log:
-    log.write('Analisi completata. File generati:\n')
-    log.write('- summary_alerts.csv\n')
-    log.write('- mezzi_distinti.csv\n')
-    log.write('- curva_SIL.png\n')
-    log.write('- diagramma_reticolare.png\n')
+log_messages.append('Analisi completata. File generati (se disponibili).')
+
+# Scrittura log
+with open(log_file, 'w') as log:
+    for msg in log_messages:
+        log.write(msg + '\n')
+
+# Stampa su console per Streamlit
+for msg in log_messages:
+    print(msg)
 
 print('Analisi completata e file generati in output_monitorrail/')
