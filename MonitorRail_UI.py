@@ -49,9 +49,9 @@ analisi_percentuale = st.sidebar.checkbox("% Avanzamento Attività")
 st.sidebar.markdown("---")
 col1, col2 = st.sidebar.columns(2)
 with col1:
-    run_analysis = st.button("▶️ Avvia Analisi", use_container_width=True)
+    run_analysis = st.button("▶️ Avvia Analisi", key="run", type="primary", help="Esegui elaborazione dei dati", use_container_width=False)
 with col2:
-    reset_analysis = st.button("🔄 Refresh", use_container_width=True)
+    reset_analysis = st.button("🔄 Refresh", key="reset", help="Riavvia la sessione", use_container_width=False)
 
 # ====================================================
 # Funzioni
@@ -82,7 +82,7 @@ if run_analysis:
             st.text(msg)
 
         st.subheader("📊 Tabella Attività")
-        st.dataframe(risultati['df_finale'], use_container_width=True)
+        st.dataframe(risultati['df_finale'], width='stretch')
 
         for key, buf in risultati.get('csv_buffers', {}).items():
             st.download_button(
@@ -99,7 +99,7 @@ if st.session_state.first_run:
     ### 🧭 Guida Rapida
     1️⃣ Carica il file Project principale (.xml)  
     2️⃣ (Facoltativo) Apri la tendina e carica un file aggiornato  
-    3️⃣ Lascia "Da file Project" o imposta un periodo personalizzato  
+    3️⃣ Lascia *"Da file Project"* o imposta un periodo personalizzato  
     4️⃣ Seleziona gli elementi da analizzare  
     5️⃣ Premi **Avvia Analisi** o **Refresh** per ripartire
-    """)
+    """, help="Puoi consultarla solo al primo avvio.")
