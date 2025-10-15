@@ -16,7 +16,7 @@ def trova_nodi_attivita(root):
     return []
 
 def analizza_file_project(baseline_file, update_file=None, opzioni=None, data_inizio=None, data_fine=None):
-    """Analizza i file XML di progetto e restituisce un DataFrame di sintesi"""
+    """Analizza i file XML di progetto e restituisce una tabella di sintesi"""
     try:
         baseline_content = baseline_file.read()
         baseline_tree = ET.parse(BytesIO(baseline_content))
@@ -24,20 +24,12 @@ def analizza_file_project(baseline_file, update_file=None, opzioni=None, data_in
     except Exception as e:
         raise Exception(f"Errore nella lettura del file baseline: {e}")
 
-    update_root = None
-    if update_file:
-        try:
-            update_content = update_file.read()
-            update_tree = ET.parse(BytesIO(update_content))
-            update_root = update_tree.getroot()
-        except Exception as e:
-            raise Exception(f"Errore nella lettura del file aggiornamento: {e}")
-
     # Trova attività
     activities_nodes = trova_nodi_attivita(baseline_root)
     if not activities_nodes:
         raise Exception("Nessuna attività trovata nel file XML. Verifica il formato.")
 
+    # Estrazione base attività
     activities = []
     for task in activities_nodes:
         name = task.findtext("Name") or task.findtext("TaskName") or "Senza nome"
@@ -48,32 +40,38 @@ def analizza_file_project(baseline_file, update_file=None, opzioni=None, data_in
             "Nome attività": name,
             "Inizio": start,
             "Fine": finish,
-            "Completamento": f"{percent}%"
+            "Completamento": float(percent)
         })
 
-    if len(activities) == 0:
-        raise Exception("File caricato ma nessuna attività leggibile: controlla i campi del file XML.")
-
     df = pd.DataFrame(activities)
+    if df.empty:
+        raise Exception("File caricato ma nessuna attività leggibile: controlla i campi XML.")
 
-    # Filtraggio per periodo
+    # Converte le date
+    for col in ["Inizio", "Fine"]:
+        df[col] = pd.to_datetime(df[col], errors="coerce")
+
+    # Filtraggio per periodo (solo se impostato)
     if data_inizio != "Da file Project" and data_fine != "Da file Project":
-        try:
-            df["Inizio"] = pd.to_datetime(df["Inizio"])
-            df["Fine"] = pd.to_datetime(df["Fine"])
-            mask = (df["Inizio"] >= pd.to_datetime(data_inizio)) & (df["Fine"] <= pd.to_datetime(data_fine))
-            df = df.loc[mask]
-        except Exception:
-            pass
+        mask = (df["Inizio"] >= pd.to_datetime(data_inizio)) & (df["Fine"] <= pd.to_datetime(data_fine))
+        df = df.loc[mask]
 
     risultati = []
-    if opzioni.get("curva_sil"):
-        risultati.append({"Analisi": "Curva SIL", "Stato": "Completata"})
-    if opzioni.get("manodopera"):
-        risultati.append({"Analisi": "Manodopera", "Stato": "Completata"})
-    if opzioni.get("mezzi"):
-        risultati.append({"Analisi": "Mezzi", "Stato": "Completata"})
-    if opzioni.get("avanzamento"):
-        risultati.append({"Analisi": "% Avanzamento Attività", "Stato": "Completata"})
+    grafici = {}
 
-    return pd.DataFrame(risultati), f"Totale attività lette: {len(df)}"
+    # --- Curva SIL (S-Curve) ---
+    if opzioni.get("curva_sil"):
+        df = df.dropna(subset=["Fine"])
+        df = df.sort_values("Fine")
+        df["Cumulativo"] = df["Completamento"].cumsum() / df["Completamento"].sum() * 100
+        grafici["Curva SIL"] = df[["Fine", "Cumulativo"]]
+        risultati.append({"Analisi": "Curva SIL", "Stato": "Completata"})
+
+    if opzioni.get("manodopera"):
+        risultati.append({"Analisi": "Manodopera", "Stato": "Completata (placeholder)"})
+    if opzioni.get("mezzi"):
+        risultati.append({"Analisi": "Mezzi", "Stato": "Completata (placeholder)"})
+    if opzioni.get("avanzamento"):
+        risultati.append({"Analisi": "% Avanzamento Attività", "Stato": "Completata (placeholder)"})
+
+    return pd.DataFrame(risultati), grafici, f"Totale attività lette: {len(df)}"
