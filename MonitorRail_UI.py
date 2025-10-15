@@ -1,139 +1,104 @@
 import streamlit as st
+import subprocess
 import pandas as pd
-import xml.etree.ElementTree as ET
-import tempfile
 import os
+import time
 
 # ===========================================================
-# MONITOR RAIL - CENTRALE DI CONTROLLO
+# MONITOR RAIL - INTERFACCIA STREAMLIT
 # ===========================================================
+
 st.set_page_config(page_title="MonitorRail Control Center", layout="wide")
 st.title("🚄 MonitorRail - Centrale di Controllo")
 
-st.markdown("""
-Benvenuto nella **Centrale di Controllo MonitorRail**  
-Gestisci il confronto tra la **baseline di progetto** e gli **avanzamenti lavori** esportati da MS Project.
-""")
+st.sidebar.header("⚙️ Parametri di Analisi")
 
-# ===========================================================
-# SEZIONE 1 - CARICAMENTO FILE BASELINE
-# ===========================================================
-st.header("📘 Programma Lavori - Baseline")
-baseline_file = st.file_uploader(
-    "Carica il file di baseline (.mpp / .xml / .csv)",
-    type=["mpp", "xml", "csv"],
-    key="baseline"
-)
+# --- Input file ---
+project_file = st.sidebar.file_uploader("Carica file di Project (formato .xml o .mpp)", type=["xml", "mpp"])
+progress_file = st.sidebar.file_uploader("Carica file Project aggiornato con avanzamento (facoltativo)", type=["xml", "mpp"])
 
-# ===========================================================
-# SEZIONE 2 - CARICAMENTO FILE AVANZAMENTO (FACOLTATIVO)
-# ===========================================================
-st.header("📗 Programma Lavori - Avanzamento (facoltativo)")
-progress_file = st.file_uploader(
-    "Carica il file di avanzamento (.mpp / .xml / .csv)",
-    type=["mpp", "xml", "csv"],
-    key="progress"
-)
+# --- Filtri temporali ---
+start_date = st.sidebar.date_input("Data inizio analisi")
+end_date = st.sidebar.date_input("Data fine analisi")
 
-# ===========================================================
-# SEZIONE 3 - PARAMETRI E AVVIO ANALISI
-# ===========================================================
-st.header("⚙️ Parametri di Analisi")
-float_threshold = st.slider("Margine di flessibilità (giorni)", 0, 30, 5)
-start_analysis = st.button("▶️ Avvia analisi del programma lavori")
+# --- Parametri avanzati ---
+float_threshold = st.sidebar.slider("Margine di flessibilità (giorni)", 0, 30, 5)
 
-# ===========================================================
-# FUNZIONE DI LETTURA XML COMPLETA
-# ===========================================================
-def parse_xml(file):
-    try:
-        tree = ET.parse(file)
-        root = tree.getroot()
-        tasks = []
-        for task in root.findall(".//Task"):
-            data = {
-                "ID": task.findtext("ID"),
-                "WBS": task.findtext("WBS"),
-                "Nome Attività": task.findtext("Name"),
-                "Durata": task.findtext("Duration"),
-                "Data Inizio": task.findtext("Start"),
-                "Data Fine": task.findtext("Finish"),
-                "% Completamento": task.findtext("PercentComplete"),
-                "Predecessori": task.findtext("PredecessorLink/PredecessorUID"),
-                "Assegnazioni Risorse": task.findtext("ResourceNames"),
-                "Costo Totale": task.findtext("Cost"),
-            }
-            if data["Nome Attività"]:
-                tasks.append(data)
-        return pd.DataFrame(tasks)
-    except Exception as e:
-        st.error(f"Errore nel parsing XML: {e}")
-        return None
+run_analysis = st.sidebar.button("▶️ Avvia Analisi")
 
-# ===========================================================
-# ESECUZIONE ANALISI
-# ===========================================================
-if start_analysis:
-    if not baseline_file:
-        st.error("⚠️ Carica almeno il file di baseline per procedere.")
+# --- Output Directory ---
+output_dir = "output_monitorrail"
+os.makedirs(output_dir, exist_ok=True)
+
+if run_analysis:
+    if project_file is None:
+        st.warning("⚠️ Carica almeno un file Project (.xml o .mpp) per avviare l'analisi.")
     else:
-        st.info("⏳ Analisi in corso...")
+        # --- Messaggio iniziale ---
+        st.info("🔍 Analisi in corso... Attendere il completamento.")
 
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            tmp.write(baseline_file.getbuffer())
-            baseline_path = tmp.name
+        # --- Barra di avanzamento simulata ---
+        progress_text = "Elaborazione dati..."
+        progress_bar = st.progress(0, text=progress_text)
 
-        df_baseline = None
+        for i in range(100):
+            time.sleep(0.05)
+            progress_bar.progress(i + 1, text=f"Elaborazione dati... {i + 1}% completato")
 
-        # --- Caso .MPP (non leggibile diretto) ---
-        if baseline_file.name.endswith(".mpp"):
-            st.warning("""
-            ⚠️ Il formato `.mpp` non può essere letto direttamente per motivi tecnici.  
-            Per procedere, esporta il file da **Microsoft Project** seguendo questi passaggi:
+        # --- Verifica tipo di file ---
+        if project_file.name.endswith('.mpp'):
+            st.warning("📁 Il file .mpp non può essere letto direttamente. Apri il file in Microsoft Project e usa **File > Esporta > XML** per salvarlo in formato compatibile.")
+        else:
+            # --- Esegui motore principale ---
+            cmd = [
+                "python", "MonitorRail_MVP.py",
+                f"--project={project_file.name if project_file else ''}",
+                f"--progress={progress_file.name if progress_file else ''}",
+                f"--start={start_date}",
+                f"--end={end_date}",
+                f"--float-threshold={float_threshold}"
+            ]
 
-            1️⃣ Apri il tuo file `.mpp` in Microsoft Project.  
-            2️⃣ Vai su **File → Salva con nome → Sfoglia**  
-            3️⃣ Nel campo **Tipo file**, scegli: `XML Data (*.xml)`  
-            4️⃣ Assegna un nome al file (es. `programma_baseline.xml`) e salvalo.  
-            5️⃣ Ricarica qui il nuovo file `.xml`.
+            with open(os.path.join(output_dir, "run_log.txt"), "w") as log:
+                process = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, text=True)
 
-            💡 *Suggerimento:* il file XML mantiene WBS, durate, legami, risorse e costi senza perdita di dati.
-            """)
-        # --- Caso .XML ---
-        elif baseline_file.name.endswith(".xml"):
-            df_baseline = parse_xml(baseline_path)
-        # --- Caso .CSV ---
-        elif baseline_file.name.endswith(".csv"):
-            df_baseline = pd.read_csv(baseline_path)
+            progress_bar.progress(100, text="Analisi completata ✅")
+            st.success("Analisi completata con successo!")
 
-        if df_baseline is not None and not df_baseline.empty:
-            st.success("✅ File baseline letto con successo.")
-            st.dataframe(df_baseline.head(30), use_container_width=True)
-            csv_path = os.path.join(tempfile.gettempdir(), "baseline_estratta.csv")
-            df_baseline.to_csv(csv_path, index=False)
-            st.download_button("⬇️ Scarica CSV estratto", data=open(csv_path, "rb").read(),
-                               file_name="baseline_estratta.csv", mime="text/csv")
+            # --- Visualizza risultati se presenti ---
+            if os.path.exists(os.path.join(output_dir, "summary_alerts.csv")):
+                st.subheader("🚨 Alert Attività Critiche e Sub-Critiche")
+                df_alert = pd.read_csv(os.path.join(output_dir, "summary_alerts.csv"))
+                st.dataframe(df_alert, use_container_width=True)
 
-        # --- File di avanzamento (opzionale) ---
-        if progress_file:
-            with tempfile.NamedTemporaryFile(delete=False) as tmp2:
-                tmp2.write(progress_file.getbuffer())
-                progress_path = tmp2.name
+            if os.path.exists(os.path.join(output_dir, "mezzi_distinti.csv")):
+                st.subheader("🚜 Mezzi distinti per tipologia")
+                df_mezzi = pd.read_csv(os.path.join(output_dir, "mezzi_distinti.csv"))
+                st.dataframe(df_mezzi, use_container_width=True)
 
-            df_progress = None
-            if progress_file.name.endswith(".xml"):
-                df_progress = parse_xml(progress_path)
-            elif progress_file.name.endswith(".csv"):
-                df_progress = pd.read_csv(progress_path)
-            elif progress_file.name.endswith(".mpp"):
-                st.warning("⚠️ Esporta anche il file di avanzamento in formato `.xml` per poterlo leggere correttamente.")
+            if os.path.exists(os.path.join(output_dir, "curva_SIL.png")):
+                st.subheader("📈 Curva di Produzione SIL")
+                st.image(os.path.join(output_dir, "curva_SIL.png"))
 
-            if df_progress is not None and not df_progress.empty:
-                st.success("✅ File avanzamento letto con successo.")
-                st.dataframe(df_progress.head(30), use_container_width=True)
+            if os.path.exists(os.path.join(output_dir, "diagramma_reticolare.png")):
+                st.subheader("🔗 Diagramma Reticolare (Percorso Critico)")
+                st.image(os.path.join(output_dir, "diagramma_reticolare.png"))
+
+st.sidebar.markdown("---")
+st.sidebar.caption("💡 MonitorRail v1.0 - sviluppato per il controllo avanzato dei cantieri ferroviari.")
 
 # ===========================================================
-# FOOTER
+# GUIDA RAPIDA
 # ===========================================================
-st.markdown("---")
-st.caption("💡 MonitorRail v2.1 - Analisi avanzata dei programmi lavori ferroviari.")
+st.markdown("""
+### 🧭 Guida Rapida
+1️⃣ Carica il file di Project (.xml esportato o .mpp originale)
+
+2️⃣ (Facoltativo) Carica un secondo file Project aggiornato con l'avanzamento attività.
+
+3️⃣ Seleziona il periodo e la soglia del margine di flessibilità.
+
+4️⃣ Clicca **Avvia Analisi** per generare i grafici e gli alert.
+
+5️⃣ I risultati saranno mostrati qui e salvati in `output_monitorrail/`.
+""")
