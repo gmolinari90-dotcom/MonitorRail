@@ -1,159 +1,95 @@
-import xml.etree.ElementTree as ET
-import pandas as pd
-import matplotlib.pyplot as plt
-import networkx as nx
-import os
-import argparse
 import streamlit as st
+import subprocess
+import pandas as pd
+import os
 
 # ===========================================================
-# MonitorRail_MVP.py - Backend reale con feedback su campi mancanti
+# MONITOR RAIL - INTERFACCIA STREAMLIT
 # ===========================================================
 
-parser = argparse.ArgumentParser(description='Motore MonitorRail')
-parser.add_argument('--project', required=True, help='File XML Project')
-parser.add_argument('--progress', default='', help='File Project aggiornamento (facoltativo)')
-parser.add_argument('--start', default='auto', help='Data inizio analisi (gg/mm/aaaa o auto)')
-parser.add_argument('--end', default='auto', help='Data fine analisi (gg/mm/aaaa o auto)')
-parser.add_argument('--float-threshold', type=int, default=5, help='Margine flessibilità totale in giorni')
-args = parser.parse_args()
+st.set_page_config(page_title="MonitorRail Control Center", layout="wide")
+st.title("🚄 MonitorRail - Centrale di Controllo")
 
-output_dir = 'output_monitorrail'
+st.sidebar.header("⚙️ Parametri di Analisi")
+
+# --- Input file ---
+mpp_file = st.sidebar.file_uploader("Carica il file Project principale", type=["xml", "mpp"])
+progress_file = st.sidebar.file_uploader("(Facoltativo) Carica secondo file Project aggiornato", type=["xml", "mpp"])
+
+# --- Filtri temporali ---
+start_date = st.sidebar.date_input("Data inizio analisi")
+end_date = st.sidebar.date_input("Data fine analisi")
+
+# --- Parametri avanzati ---
+float_threshold = st.sidebar.slider("Margine di flessibilità (giorni)", 0, 30, 5)
+
+run_analysis = st.sidebar.button("▶️ Avvia Analisi")
+
+# --- Output Directory ---
+output_dir = "output_monitorrail"
 os.makedirs(output_dir, exist_ok=True)
 
-# Creazione log dettagliato
-log_file = os.path.join(output_dir, 'run_log.txt')
-log_messages = []
+if run_analysis:
+    st.info("Analisi in corso... Attendere il completamento.")
+
+    # Esegui motore principale con parametri selezionati
+    cmd = [
+        "python", "MonitorRail_MVP.py",
+        f"--project={mpp_file.name if mpp_file else ''}",
+        f"--progress={progress_file.name if progress_file else ''}",
+        f"--start={start_date.strftime('%d/%m/%Y') if start_date else 'auto'}",
+        f"--end={end_date.strftime('%d/%m/%Y') if end_date else 'auto'}",
+        f"--float-threshold={float_threshold}"
+    ]
+
+    # Log completo dell'esecuzione
+    log_file_path = os.path.join(output_dir, "run_log.txt")
+    with open(log_file_path, "w") as log:
+        process = subprocess.run(cmd, stdout=log, stderr=subprocess.STDOUT, text=True)
+
+    # Mostra log direttamente nella UI
+    if os.path.exists(log_file_path):
+        with st.expander("📋 Log Analisi / Avvisi"):
+            with open(log_file_path, "r") as f:
+                st.text(f.read())
+
+    st.success("Analisi completata ✅")
+
+    # Visualizza risultati se presenti
+    if os.path.exists(os.path.join(output_dir, "summary_alerts.csv")):
+        st.subheader("🚨 Alert Attività Critiche e Sub-Critiche")
+        df_alert = pd.read_csv(os.path.join(output_dir, "summary_alerts.csv"))
+        st.dataframe(df_alert, use_container_width=True)
+        st.download_button("⬇️ Scarica summary_alerts.csv", os.path.join(output_dir, "summary_alerts.csv"))
+
+    if os.path.exists(os.path.join(output_dir, "mezzi_distinti.csv")):
+        st.subheader("🚜 Mezzi distinti per tipologia")
+        df_mezzi = pd.read_csv(os.path.join(output_dir, "mezzi_distinti.csv"))
+        st.dataframe(df_mezzi, use_container_width=True)
+        st.download_button("⬇️ Scarica mezzi_distinti.csv", os.path.join(output_dir, "mezzi_distinti.csv"))
+
+    if os.path.exists(os.path.join(output_dir, "curva_SIL.png")):
+        st.subheader("📈 Curva di Produzione SIL")
+        st.image(os.path.join(output_dir, "curva_SIL.png"))
+        st.download_button("⬇️ Scarica curva_SIL.png", os.path.join(output_dir, "curva_SIL.png"))
+
+    if os.path.exists(os.path.join(output_dir, "diagramma_reticolare.png")):
+        st.subheader("🔗 Diagramma Reticolare (Percorso Critico)")
+        st.image(os.path.join(output_dir, "diagramma_reticolare.png"))
+        st.download_button("⬇️ Scarica diagramma_reticolare.png", os.path.join(output_dir, "diagramma_reticolare.png"))
+
+st.sidebar.markdown("---")
+st.sidebar.caption("💡 MonitorRail v1.0 - sviluppato per il controllo avanzato dei cantieri ferroviari.")
 
 # ===========================================================
-# 1️⃣ Lettura file Project XML
+# GUIDA RAPIDA secondaria
 # ===========================================================
-project_file = args.project
-
-try:
-    tree = ET.parse(project_file)
-    root = tree.getroot()
-    log_messages.append(f'File {project_file} letto correttamente.')
-except Exception as e:
-    log_messages.append(f'ERRORE lettura file: {e}')
-    raise
-
-ns = {'ns': 'http://schemas.microsoft.com/project'}
-
-activities = []
-for task in root.findall('.//ns:Task', ns):
-    id_task = task.find('ns:UID', ns).text if task.find('ns:UID', ns) is not None else None
-    name = task.find('ns:Name', ns).text if task.find('ns:Name', ns) is not None else None
-    start = task.find('ns:Start', ns).text if task.find('ns:Start', ns) is not None else None
-    finish = task.find('ns:Finish', ns).text if task.find('ns:Finish', ns) is not None else None
-    percent_complete = task.find('ns:PercentComplete', ns).text if task.find('ns:PercentComplete', ns) is not None else None
-    total_slack = task.find('ns:TotalSlack', ns).text if task.find('ns:TotalSlack', ns) is not None else None
-    resources = []
-    for res_assign in task.findall('ns:Assignments/ns:Assignment', ns):
-        res_name = res_assign.find('ns:ResourceUID', ns).text
-        resources.append(res_name)
-
-    activities.append({
-        'UID': id_task,
-        'Nome': name,
-        'Start': start,
-        'Finish': finish,
-        '%Completamento': percent_complete,
-        'TotalSlack': total_slack,
-        'Risorse': resources
-    })
-
-if len(activities) == 0:
-    log_messages.append('⚠ Nessuna attività letta. Verranno creati file fittizi di test.')
-
-# Creazione DataFrame
-df_activities = pd.DataFrame(activities)
-
-# Controllo campi critici
-critical_fields = ['%Completamento', 'TotalSlack', 'Start', 'Finish', 'UID', 'Nome']
-for field in critical_fields:
-    if df_activities[field].isnull().all():
-        log_messages.append(f'⚠ Attenzione: nessun dato {field} letto. Alcuni calcoli potrebbero non essere disponibili.')
-
-# ===========================================================
-# Filtraggio periodo
-# ===========================================================
-if args.start != 'auto':
-    start_filter = pd.to_datetime(args.start, dayfirst=True)
-    df_activities['Start_dt'] = pd.to_datetime(df_activities['Start'], errors='coerce')
-    df_activities = df_activities[df_activities['Start_dt'] >= start_filter]
-
-if args.end != 'auto':
-    end_filter = pd.to_datetime(args.end, dayfirst=True)
-    df_activities['Finish_dt'] = pd.to_datetime(df_activities['Finish'], errors='coerce')
-    df_activities = df_activities[df_activities['Finish_dt'] <= end_filter]
-
-# ===========================================================
-# Attività critiche / sub-critiche
-# ===========================================================
-threshold = args.float_threshold
-if 'TotalSlack' in df_activities.columns and df_activities['TotalSlack'].notnull().any():
-    critical_tasks = df_activities[df_activities['TotalSlack'].astype(float) <= threshold]
-    critical_tasks.to_csv(os.path.join(output_dir, 'summary_alerts.csv'), index=False)
-else:
-    log_messages.append('⚠ Non è possibile generare summary_alerts.csv: TotalSlack non disponibile.')
-
-# ===========================================================
-# Mezzi distinti
-# ===========================================================
-if 'Risorse' in df_activities.columns and df_activities['Risorse'].notnull().any():
-    mezzi_list = []
-    for res_list in df_activities['Risorse']:
-        mezzi_list.extend(res_list)
-    mezzi_distinti = pd.DataFrame(pd.Series(mezzi_list).value_counts()).reset_index()
-    mezzi_distinti.columns = ['Mezzo', 'Quantità']
-    mezzi_distinti.to_csv(os.path.join(output_dir, 'mezzi_distinti.csv'), index=False)
-else:
-    log_messages.append('⚠ Non è possibile generare mezzi_distinti.csv: Risorse non disponibili.')
-
-# ===========================================================
-# Curva SIL cumulativa
-# ===========================================================
-if '%Completamento' in df_activities.columns and df_activities['%Completamento'].notnull().any():
-    df_activities['AvanzamentoEconomico'] = df_activities['%Completamento'].astype(float)
-    sil_curve = df_activities.groupby('Start')['AvanzamentoEconomico'].sum().cumsum()
-    plt.figure(figsize=(10,5))
-    sil_curve.plot()
-    plt.title('Curva di Produzione SIL')
-    plt.xlabel('Data Inizio Attività')
-    plt.ylabel('Avanzamento cumulativo')
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, 'curva_SIL.png'))
-    plt.close()
-else:
-    log_messages.append('⚠ Non è possibile generare curva_SIL.png: %Completamento non disponibile.')
-
-# ===========================================================
-# Diagramma reticolare percorso critico
-# ===========================================================
-G = nx.DiGraph()
-for idx, row in df_activities.iterrows():
-    G.add_node(row['Nome'], slack=row['TotalSlack'] if row['TotalSlack'] else 0)
-
-plt.figure(figsize=(12,8))
-pos = nx.spring_layout(G)
-nx.draw(G, pos, with_labels=True, node_color='lightblue', node_size=1500, arrowsize=20)
-nx.draw_networkx_edge_labels(G, pos, edge_labels={(u,v): G.nodes[v]['slack'] for u,v in G.edges})
-plt.title('Diagramma Reticolare (Percorso Critico)')
-plt.tight_layout()
-plt.savefig(os.path.join(output_dir, 'diagramma_reticolare.png'))
-plt.close()
-
-log_messages.append('Analisi completata. File generati (se disponibili).')
-
-# Scrittura log
-with open(log_file, 'w') as log:
-    for msg in log_messages:
-        log.write(msg + '\n')
-
-# Stampa su console per Streamlit
-for msg in log_messages:
-    print(msg)
-
-print('Analisi completata e file generati in output_monitorrail/')
+st.markdown("""
+### 🧭 Guida Rapida
+- Carica il file di Project principale (.xml o .mpp)
+- (Facoltativo) Carica un secondo file Project aggiornato con l'avanzamento attività
+- Seleziona il periodo e la soglia del margine di flessibilità
+  - Se non selezioni le date, verrà analizzato l'intero progetto
+- Clicca **Avvia Analisi** per generare i grafici e gli alert
+- I risultati saranno mostrati qui e salvati in `output_monitorrail/`
+""")
