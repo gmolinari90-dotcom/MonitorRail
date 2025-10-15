@@ -39,11 +39,16 @@ os.makedirs(output_dir, exist_ok=True)
 with st.expander("ℹ️ Info / Guida Rapida", expanded=False):
     st.markdown("""
     ### Guida Rapida
+    
     1️⃣ Carica il file di Project (.xml esportato o .mpp originale)
+    
     2️⃣ (Facoltativo) Carica un secondo file Project aggiornato con l'avanzamento attività.
+    
     3️⃣ Seleziona il periodo e la soglia del margine di flessibilità.
        - Se non selezioni le date, verrà analizzato l'intero progetto.
+
     4️⃣ Clicca **Avvia Analisi** per generare i grafici e gli alert.
+
     5️⃣ I risultati saranno mostrati qui e salvati in `output_monitorrail/`.
     """)
 
@@ -123,4 +128,4 @@ if run_analysis:
                     st.download_button("⬇️ Scarica PNG", data=f, file_name="diagramma_reticolare.png", mime="image/png")
 
 st.sidebar.markdown("---")
-st.sidebar.caption("💡 MonitorRail v2.3 - Analisi avanzata dei programmi lavori ferroviari.")
+st.sidebar.caption("💡 MonitorRail v2.4 - Analisi avanzata dei programmi lavori ferroviari.")
