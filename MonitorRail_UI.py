@@ -2,14 +2,11 @@ import streamlit as st
 from MonitorRail_MVP import analizza_file_project
 import time
 
-# Impostazioni iniziali
 st.set_page_config(page_title="MonitorRail", layout="wide")
 
-# Inizializzazione sessione
 if "first_run" not in st.session_state:
     st.session_state.first_run = True
 
-# Titolo principale
 st.title("🚄 MonitorRail – Analisi Avanzamento Progetto")
 
 st.divider()
@@ -43,17 +40,12 @@ analisi_scelte = any([curva_sil, manodopera, mezzi, avanzamento])
 
 st.divider()
 colA, colB = st.columns([3, 1])
-
-# Bottone Refresh
 colB.button("🔄 Refresh", key="refresh_button", on_click=lambda: st.rerun())
-
-# Bottone Avvio Analisi
 run_analysis = colA.button("🚀 Avvia Analisi", disabled=not analisi_scelte)
 
-# Log e verifica file
-log_area = st.container()
-with log_area:
-    st.markdown("#### 📋 Log Verifica File")
+# Variabili di log
+log_text = ""
+show_log = False
 
 if run_analysis:
     st.session_state.first_run = False
@@ -64,12 +56,12 @@ if run_analysis:
             progress_text = "Analisi dei dati in corso..."
             progress_bar = st.progress(0, text=progress_text)
 
-            for percent in range(0, 101, 20):
+            for percent in range(0, 101, 25):
                 time.sleep(0.2)
                 progress_bar.progress(percent, text=f"{progress_text} ({percent}%)")
 
             try:
-                risultati = analizza_file_project(
+                risultati, log_text = analizza_file_project(
                     baseline_file=baseline_file,
                     update_file=update_file,
                     opzioni={
@@ -83,8 +75,15 @@ if run_analysis:
                 )
 
                 st.success("✅ Analisi completata con successo!")
-                st.write("**Risultati sintetici:**")
                 st.dataframe(risultati, width="stretch")
+
+                if log_text:
+                    st.markdown("🔺 **Log analisi dettagliato disponibile**")
+                    with st.expander("🩶 Log Analisi Dettagliata"):
+                        st.info(log_text)
 
             except Exception as e:
                 st.error(f"❌ Errore durante l’analisi: {e}")
+                st.markdown("🔺 **Log analisi dettagliato disponibile**")
+                with st.expander("🩶 Log Analisi Dettagliata"):
+                    st.code(str(e))
