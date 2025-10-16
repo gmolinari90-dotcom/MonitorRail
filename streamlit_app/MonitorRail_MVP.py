@@ -83,3 +83,4 @@ def extract_tasks_in_period(parsed_json, start_date=None, end_date=None):
                 "actualCost": t.get("actualCost")
             })
     return pd.DataFrame(rows)
+
