@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 import io
 from datetime import datetime
+import json
 
 # CONFIG: impostare come env var o sostituire direttamente per test
 import os
@@ -75,5 +76,6 @@ def extract_tasks_in_period(parsed_json, start_date=None, end_date=None):
                 "actualCost": t.get("actualCost")
             })
     return pd.DataFrame(rows)
+
 
 
