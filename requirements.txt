@@ -1,6 +1,5 @@
 streamlit
 pandas
+JPype1
+mpxj
 matplotlib
-networkx
-python-dateutil
-lxml
