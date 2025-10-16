@@ -1,37 +1,29 @@
-# MonitorRail_MVP.py (client che chiama il microservizio)
+# MonitorRail_MVP.py
 import requests
 import pandas as pd
-from datetime import datetime
 import io
+from datetime import datetime
 
-# CONFIG — imposta l'URL del servizio e la chiave API (env o fixta durante test)
-SERVICE_URL = "https://your-mpp-service.example.com"  # cambia con il tuo endpoint
-API_KEY = "metti_la_tua_chiave_api"
+# CONFIG: impostare come env var o sostituire direttamente per test
+import os
+SERVICE_URL = os.getenv("SERVICE_URL", "http://localhost:8080")
+API_KEY = os.getenv("MONITORRAIL_API_KEY", "la-tua-chiave")  # cambiare in produzione
 
 def convert_mpp_to_json(mpp_bytes):
     url = f"{SERVICE_URL}/api/parse-mpp"
-    headers = {"X-API-KEY": API_KEY}
+    headers = {"X-API-KEY": API_KEY} if API_KEY else {}
     files = {"file": ("project.mpp", mpp_bytes)}
-    r = requests.post(url, headers=headers, files=files, timeout=300)
-    r.raise_for_status()
-    return r.json()
+    resp = requests.post(url, headers=headers, files=files, timeout=300)
+    resp.raise_for_status()
+    return resp.json()
 
 def build_scurve_from_json(parsed_json, period="M"):
-    """
-    parsed_json: dict come restituito dal servizio
-    period: 'M' per mese, 'W' per settimana
-    """
     tasks = parsed_json.get("tasks", [])
-    # collect timephased rows: periodStart, periodEnd, planned or value
     rows = []
     for t in tasks:
-        t_id = t.get("id")
         for tp in t.get("timephased", []):
             start = tp.get("start")
-            finish = tp.get("finish")
             value = tp.get("value") or 0.0
-            # convert to pandas period (monthly)
-            # we will bucket by month of period start
             try:
                 dt = pd.to_datetime(start)
                 period_label = dt.to_period(period).to_timestamp()
@@ -83,4 +75,3 @@ def extract_tasks_in_period(parsed_json, start_date=None, end_date=None):
                 "actualCost": t.get("actualCost")
             })
     return pd.DataFrame(rows)
-
