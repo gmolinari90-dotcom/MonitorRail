@@ -11,8 +11,8 @@ st.set_page_config(page_title="MonitorRail MPP", layout="wide")
 st.title("MonitorRail - Lettura MPP via microservizio")
 
 # CONFIG via env o streamlit secrets
-SERVICE_URL = st.secrets.get("SERVICE_URL") if "SERVICE_URL" in st.secrets else os.getenv("SERVICE_URL", "http://localhost:8080")
-API_KEY = st.secrets.get("API_KEY") if "API_KEY" in st.secrets else os.getenv("MONITORRAIL_API_KEY", "la-tua-chiave")
+SERVICE_URL = st.secrets.get("SERVICE_URL") if "SERVICE_URL" in st.secrets else os.getenv("SERVICE_URL", "https://monitorrail.onrender.com")
+API_KEY = st.secrets.get("API_KEY") if "API_KEY" in st.secrets else os.getenv("MONITORRAIL_API_KEY", "secretmonitor1582")
 
 st.markdown("1️⃣ Carica file .MPP (il file verrà convertito in JSON dal servizio)")
 
@@ -82,3 +82,4 @@ if "parsed_json" in st.session_state:
             st.info("Analisi mezzi: in sviluppo (placeholder).")
         if avanz:
             st.info("Analisi avanzamento: in sviluppo (placeholder).")
+
