@@ -6,8 +6,8 @@ from datetime import datetime
 
 # CONFIG: impostare come env var o sostituire direttamente per test
 import os
-SERVICE_URL = os.getenv("SERVICE_URL", "http://localhost:8080")
-API_KEY = os.getenv("MONITORRAIL_API_KEY", "la-tua-chiave")  # cambiare in produzione
+SERVICE_URL = os.getenv("SERVICE_URL", "https://monitorrail.onrender.com")
+API_KEY = os.getenv("MONITORRAIL_API_KEY", "070854")  # cambiare in produzione
 
 def convert_mpp_to_json(mpp_bytes):
     url = f"{SERVICE_URL}/api/parse-mpp"
@@ -75,3 +75,4 @@ def extract_tasks_in_period(parsed_json, start_date=None, end_date=None):
                 "actualCost": t.get("actualCost")
             })
     return pd.DataFrame(rows)
+
