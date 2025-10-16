@@ -1,73 +1,85 @@
+# MonitorRail_MVP.py (client che chiama il microservizio)
+import requests
 import pandas as pd
-import jpype
-import jpype.imports
-from jpype.types import *
-import os
+from datetime import datetime
+import io
 
-# === CONFIGURAZIONE ===
-MPXJ_JAR_PATH = os.path.join(os.getcwd(), "mpxj-all.jar")
+# CONFIG — imposta l'URL del servizio e la chiave API (env o fixta durante test)
+SERVICE_URL = "https://your-mpp-service.example.com"  # cambia con il tuo endpoint
+API_KEY = "metti_la_tua_chiave_api"
 
-def avvia_jvm():
-    """Avvia la JVM se non è già in esecuzione"""
-    if not jpype.isJVMStarted():
-        jpype.startJVM(classpath=[MPXJ_JAR_PATH])
+def convert_mpp_to_json(mpp_bytes):
+    url = f"{SERVICE_URL}/api/parse-mpp"
+    headers = {"X-API-KEY": API_KEY}
+    files = {"file": ("project.mpp", mpp_bytes)}
+    r = requests.post(url, headers=headers, files=files, timeout=300)
+    r.raise_for_status()
+    return r.json()
 
-def leggi_mpp(file_path):
-    """Legge un file MPP usando MPXJ"""
-    from net.sf.mpxj.reader import UniversalProjectReader
-    reader = UniversalProjectReader()
-    project = reader.read(file_path)
-    return project
-
-def estrai_attivita_da_mpp(file_path):
-    """Estrae le attività principali da un file MPP"""
-    avvia_jvm()
-    project = leggi_mpp(file_path)
-    data = []
-
-    for task in project.getTasks():
-        if task.getName():
-            data.append({
-                "Nome attività": task.getName(),
-                "Inizio": str(task.getStart()),
-                "Fine": str(task.getFinish()),
-                "Durata (giorni)": str(task.getDuration()),
-                "% Completamento": float(task.getPercentageComplete()),
-                "Costo previsto": float(task.getCost()),
-                "Costo effettivo": float(task.getActualCost())
-            })
-
-    df = pd.DataFrame(data)
+def build_scurve_from_json(parsed_json, period="M"):
+    """
+    parsed_json: dict come restituito dal servizio
+    period: 'M' per mese, 'W' per settimana
+    """
+    tasks = parsed_json.get("tasks", [])
+    # collect timephased rows: periodStart, periodEnd, planned or value
+    rows = []
+    for t in tasks:
+        t_id = t.get("id")
+        for tp in t.get("timephased", []):
+            start = tp.get("start")
+            finish = tp.get("finish")
+            value = tp.get("value") or 0.0
+            # convert to pandas period (monthly)
+            # we will bucket by month of period start
+            try:
+                dt = pd.to_datetime(start)
+                period_label = dt.to_period(period).to_timestamp()
+                rows.append({"period": period_label, "value": float(value)})
+            except Exception:
+                continue
+    if not rows:
+        return pd.DataFrame(columns=["period", "value", "cumulative"])
+    df = pd.DataFrame(rows)
+    df = df.groupby("period", as_index=False).sum()
+    df = df.sort_values("period")
+    df["cumulative"] = df["value"].cumsum()
     return df
 
-def filtra_attivita_per_periodo(df, data_inizio, data_fine):
-    """Filtra le attività nel range di date selezionato"""
-    try:
-        if data_inizio and data_fine and data_inizio != "Da file Project" and data_fine != "Da file Project":
-            df["Inizio"] = pd.to_datetime(df["Inizio"], errors="coerce")
-            df["Fine"] = pd.to_datetime(df["Fine"], errors="coerce")
-            mask = (df["Inizio"] >= pd.to_datetime(data_inizio)) & (df["Fine"] <= pd.to_datetime(data_fine))
-            return df.loc[mask]
-        else:
-            return df
-    except Exception:
-        return df
-
-def analizza_file_project_mpp(mpp_file_path, opzioni=None, data_inizio=None, data_fine=None):
-    """Funzione principale di analisi"""
-    df = estrai_attivita_da_mpp(mpp_file_path)
-    df_filtrato = filtra_attivita_per_periodo(df, data_inizio, data_fine)
-
-    risultati = []
-    grafici = {}
-
-    if opzioni.get("curva_sil"):
-        risultati.append({"Analisi": "Curva SIL", "Stato": "Completata (placeholder)"})
-    if opzioni.get("manodopera"):
-        risultati.append({"Analisi": "Manodopera", "Stato": "Completata (placeholder)"})
-    if opzioni.get("mezzi"):
-        risultati.append({"Analisi": "Mezzi", "Stato": "Completata (placeholder)"})
-    if opzioni.get("avanzamento"):
-        risultati.append({"Analisi": "% Avanzamento Attività", "Stato": "Completata (placeholder)"})
-
-    return df_filtrato, pd.DataFrame(risultati)
+def extract_tasks_in_period(parsed_json, start_date=None, end_date=None):
+    tasks = parsed_json.get("tasks", [])
+    rows = []
+    for t in tasks:
+        start = t.get("start")
+        finish = t.get("finish")
+        try:
+            s = pd.to_datetime(start) if start else None
+            f = pd.to_datetime(finish) if finish else None
+        except Exception:
+            s = f = None
+        include = True
+        if start_date and start_date != "Da file Project":
+            try:
+                sd = pd.to_datetime(start_date, dayfirst=True)
+                if not s or s < sd:
+                    include = False
+            except Exception:
+                pass
+        if end_date and end_date != "Da file Project":
+            try:
+                ed = pd.to_datetime(end_date, dayfirst=True)
+                if not f or f > ed:
+                    include = False
+            except Exception:
+                pass
+        if include:
+            rows.append({
+                "id": t.get("id"),
+                "name": t.get("name"),
+                "start": start,
+                "finish": finish,
+                "percentComplete": t.get("percentComplete"),
+                "cost": t.get("cost"),
+                "actualCost": t.get("actualCost")
+            })
+    return pd.DataFrame(rows)
